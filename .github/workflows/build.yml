@@ -1,0 +1,62 @@
+name: Build Mugetsu x86-64-v2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout VibeSkuffle
+        uses: actions/checkout@v4
+        with:
+          repository: Aeoniian/VibeSkuffle
+
+      - name: Install Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --no-self-update
+          rustup default 1.99.0
+          rustc --version
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Patch target CPU to x86-64-v2 and Build
+        shell: pwsh
+        run: |
+          $file = 'scripts\build-ruffle.ps1'
+          $script = Get-Content -Raw $file
+          $find = '$script = $script.Replace($anchor, $anchor + "
+Run git @(''-C'', $ruffle, ''apply'', ''--whitespace=nowarn'', (Join-Path $root ''patches\skua.patch''))")'
+          $replace = $find + "
+$script = $script.Replace("'-Ctarget-cpu=x86-64-v3'", "'-Ctarget-cpu=x86-64-v2'")"
+          if (-not $script.Contains($find)) {
+            throw "Anchor not found in build-ruffle.ps1"
+          }
+          $script = $script.Replace($find, $replace)
+          Set-Content -Path $file -Value $script -Encoding UTF8
+
+          & .\scripts\build-ruffle.ps1 -NoPgo
+
+      - name: Verify Mugetsu binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path out\ruffle\Mugetsu.exe)) {
+            throw "out\ruffle\Mugetsu.exe not found!"
+          }
+          $hash = (Get-FileHash out\ruffle\Mugetsu.exe -Algorithm SHA256).Hash
+          Write-Host "Mugetsu.exe built successfully. SHA256: $hash"
+
+      - name: Upload Mugetsu Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mugetsu-x86-64-v2
+          path: out/ruffle/Mugetsu.exe
